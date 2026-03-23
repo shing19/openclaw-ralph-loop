@@ -12,6 +12,7 @@ Use OpenClaw heartbeat as the scheduler for a long-running Ralph Loop workflow w
 * every task runs in a fresh worker process
 * every failed attempt leaves durable logs
 * retries inherit prior failure logs
+* `progress.md` acts as a required retry gate
 * the workflow can continue for many hours without one giant agent run
 * multiple projects can be active at the same time
 * results can be reported back to the originating Slack thread for each run
@@ -54,7 +55,7 @@ This means the controller can behave like a bounded scheduler:
 * read state files
 * decide one next action
 * launch or poll a worker
-* update state
+* read and update `progress.md` and state
 * exit
 
 ## Architecture
@@ -102,6 +103,8 @@ Recommended worker shape:
 * the wrapper launches `codex` or another coding runtime
 * stdout and stderr are redirected to a durable log file
 * the wrapper writes a small result file on completion
+* the wrapper reads `progress.md` before task work
+* the wrapper updates `progress.md` before exit
 * the wrapper exits
 
 The controller never reuses a worker process across tasks.
@@ -414,6 +417,10 @@ A Slack stop command or an on-disk stop flag should transition the run to `CANCE
 10. select the first runnable task
 11. move to `TASK_READY`
 
+Preflight should not stop at generic shell checks.
+
+It should also validate the real task runtime contract, including a smoke test of the same wrapper and command shape that the task worker will use.
+
 ### Phase 5: task execution
 
 1. Heartbeat wakes the controller.
@@ -427,10 +434,12 @@ A Slack stop command or an on-disk stop flag should transition the run to `CANCE
 9. validation commands
 10. attempt number
 11. previous failed log paths, if any
-12. Worker reads prior logs before work when `attempt > 1`.
-13. Worker performs one task only.
-14. Worker writes a result file and a durable log, then exits.
-15. Controller marks `TASK_RUNNING`.
+12. condensed prior failure summary
+13. Worker reads `progress.md` before work.
+14. Worker reads prior logs before work when `attempt > 1`.
+15. Worker performs one task only.
+16. Worker writes a result file, a durable log, and a progress update, then exits.
+17. Controller marks `TASK_RUNNING`.
 
 ### Phase 6: task result handling
 
@@ -443,11 +452,12 @@ A Slack stop command or an on-disk stop flag should transition the run to `CANCE
 7. optionally send a short Slack update
 8. If retryable failure:
 9. persist failure summary and log path
-10. increment attempt count
-11. move to `TASK_RETRY_WAIT` or directly back to `TASK_READY`
-12. If blocked or fatal failure:
-13. move to `WAIT_HUMAN` or `FAILED_FATAL`
-14. send failure report with log path
+10. inspect failure class and fingerprint
+11. increment attempt count only if retry is still allowed
+12. move to `TASK_RETRY_WAIT` only if retry budget and progress gate both allow it
+13. If blocked or fatal failure:
+14. move to `WAIT_HUMAN` or `FAILED_FATAL`
+15. send failure report with log path
 
 ### Phase 7: running task polling
 
@@ -637,6 +647,9 @@ Recommended worker policy:
 * run the process under a narrow allowlisted wrapper script
 * use `pty: true` only if the worker runtime needs a real terminal
 * always redirect output to durable logs
+* require the wrapper to write structured failure classes and fingerprints
+* require the wrapper to update `progress.md`
+* require the wrapper to use a tested runtime contract, not ad hoc CLI flags
 
 ## Run selection policy
 
@@ -670,6 +683,8 @@ Recommended `HEARTBEAT.md` contents:
 * the stop conditions
 * the rule that only one transition is allowed per heartbeat
 * the rule that retries must include prior failure logs
+* the rule that retries must read `progress.md` before relaunch
+* the rule that non-retryable failure classes must stop blind retries
 * the run selection order
 * the rule that `TASK_RUNNING` only polls
 * the rule that reporting uses stored `reportTarget`
@@ -786,4 +801,6 @@ Use this architecture doc together with:
 * `reference/design/heartbeat/plan-heartbeat-operator-protocol.md`
 * `reference/design/heartbeat/plan-heartbeat-state-protocol.md`
 * `reference/design/heartbeat/plan-heartbeat-plan-normalization.md`
+* `reference/design/heartbeat/plan-heartbeat-worker-protocol.md`
+* `reference/design/heartbeat/plan-heartbeat-progress-protocol.md`
 * `reference/design/heartbeat/plan-heartbeat-verification-checklist.md`

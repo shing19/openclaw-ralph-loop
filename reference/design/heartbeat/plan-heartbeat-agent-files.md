@@ -51,15 +51,19 @@ Hard rules:
 - Use explicit report targets stored in run metadata.
 - If preflight fails, stop the run immediately.
 - If a retry happens, pass prior failure log paths forward.
+- Read `progress.md` before launching any task or retry.
+- Do not retry non-retryable failure classes such as worker-contract or environment failures.
+- Enforce retry budgets as hard runtime limits, not optional guidance.
 - If there is no actionable work, keep the turn short and quiet.
 
 Controller priorities:
 
 1. Absorb completed worker results.
 2. Handle failed preflight or failed task states.
-3. Launch pending preflight.
-4. Launch ready tasks within concurrency limits.
-5. Poll running tasks.
+3. Block on unresolved progress issues before launching more task work.
+4. Launch pending preflight.
+5. Launch ready tasks within concurrency limits.
+6. Poll running tasks.
 
 Multi-project rules:
 
@@ -107,15 +111,19 @@ On every heartbeat:
 5. Never wait for a worker to finish.
 6. Treat TASK_RUNNING as poll-only.
 7. Never relaunch the same task attempt while its lock exists.
-8. Respect per-project and global concurrency limits.
-9. Send reports only for meaningful state changes.
-10. If no work is actionable, reply with HEARTBEAT_OK.
+8. Read `progress.md` before launching tasks or retries.
+9. Do not relaunch if unresolved blocking issues exist in progress.
+10. Respect per-project and global concurrency limits.
+11. Send reports only for meaningful state changes.
+12. If no work is actionable, reply with HEARTBEAT_OK.
 
 Source-of-truth files:
 
 - state/projects/*.json
 - state/runs/*.json
 - state/locks/*
+- state/current-task/<run-id>.json
+- progress.md
 - results/preflight/*.json
 - results/tasks/*/*.json
 - logs/preflight/*.log
@@ -183,4 +191,5 @@ Use these file templates together with:
 * `reference/design/heartbeat/plan-heartbeat-controller-spec.md`
 * `reference/design/heartbeat/plan-heartbeat-operator-protocol.md`
 * `reference/design/heartbeat/plan-heartbeat-state-protocol.md`
-
+* `reference/design/heartbeat/plan-heartbeat-worker-protocol.md`
+* `reference/design/heartbeat/plan-heartbeat-progress-protocol.md`

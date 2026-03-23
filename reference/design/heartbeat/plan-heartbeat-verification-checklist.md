@@ -44,7 +44,7 @@ Recommended evidence sources:
 
 * `state/projects/*.json`
 * `state/runs/*.json`
-* `state/current-task.json`
+* `state/current-task/<run-id>.json`
 * `state/plan-state.json`
 * `progress.md`
 * `results/plan-check/*.json`
@@ -70,6 +70,7 @@ A run is not considered healthy unless all of these are true:
 * failures leave logs and deterministic state
 * retries inherit prior failure logs
 * no duplicate worker launch happens for one task attempt
+* non-retryable failure classes do not enter blind retry
 
 ## Phase 1: Configuration and wiring
 
@@ -268,6 +269,7 @@ Pass criteria:
 * workspace read/write is verified
 * worker can execute a simple command and return status
 * worker can write, read back, and delete a temp file
+* worker runtime wrapper smoke test passes with the real task runtime
 
 Expected evidence:
 
@@ -278,6 +280,7 @@ Failure examples:
 
 * preflight passes without proving file write/delete
 * preflight passes but worker execution is not actually available
+* preflight passes but the real `codex` worker contract still fails immediately
 
 ### Check 4.3: Preflight failure is terminal for the run
 
@@ -328,7 +331,7 @@ Pass criteria:
 Expected evidence:
 
 * `state/locks/<task-id>.attempt-<n>.lock`
-* `state/current-task.json`
+* `state/current-task/<run-id>.json`
 
 Failure examples:
 
@@ -360,6 +363,7 @@ Pass criteria:
 
 * `progress.md` reflects the new task outcome
 * run state advances correctly after result absorption
+* failure outcomes are also reflected in `progress.md` with log paths
 
 Expected evidence:
 
@@ -370,6 +374,7 @@ Failure examples:
 
 * code changes landed but `progress.md` is stale
 * task result was absorbed but run state did not move
+* task failed but there is no corresponding progress entry with a log path
 
 ### Check 5.5: Commit behavior is verified if enabled
 
@@ -402,7 +407,7 @@ Pass criteria:
 
 Expected evidence:
 
-* `state/current-task.json`
+* `state/current-task/<run-id>.json`
 * stable task-attempt lock
 
 Failure examples:
@@ -451,6 +456,7 @@ Pass criteria:
 * retryable task failure moves to `TASK_RETRY_WAIT`
 * retry budget is decremented
 * retry does not happen before backoff expires
+* non-retryable failure classes do not re-enter retry
 
 Expected evidence:
 
@@ -461,6 +467,7 @@ Failure examples:
 
 * task failure triggers immediate uncontrolled relaunch
 * retry count is not tracked
+* worker-contract or environment failures are retried anyway
 
 ### Check 7.3: Next worker inherits prior failure logs
 
@@ -469,6 +476,7 @@ Pass criteria:
 * new worker receives attempt number
 * new worker receives prior log path list
 * new worker is told to read prior failure evidence before acting
+* new worker reads `progress.md` before acting
 
 Expected evidence:
 
@@ -479,6 +487,7 @@ Failure examples:
 
 * retry starts from zero context
 * controller forgets previous failure logs
+* retry ignores unresolved blocking entries in `progress.md`
 
 ### Check 7.4: Reporting failure does not rerun execution
 
@@ -583,9 +592,11 @@ Use this table to find the first failing layer.
 | Run stuck in `PLAN_CHECK_PENDING` | heartbeat wake-up, controller launch path | scheduling |
 | Plan-check log exists but no result | worker wrapper or result write path | worker I/O |
 | Preflight never starts | state transition `PLAN_READY -> PRECHECK_PENDING` | controller state machine |
+| Preflight passed but task runtime still fails on first invocation | worker protocol or preflight smoke test | worker contract |
 | Preflight passed but task never launches | task selection, lock creation, budget gate | scheduler |
 | Task launches twice | lock handling, reconcile logic | duplicate launch protection |
 | Code changed but `progress.md` did not update | result absorption path | persistence |
+| Infinite retry on same error | retry budget, failure classification, progress gate | retry control |
 | Task failed but retry has no context | retry payload builder | retry inheritance |
 | Slack report missing but task result exists | reporting path | notification only |
 | Final state unclear after restart | reconcile algorithm and synthetic failure generation | crash recovery |

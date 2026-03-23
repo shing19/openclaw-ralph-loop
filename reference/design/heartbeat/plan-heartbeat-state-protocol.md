@@ -23,6 +23,7 @@ Recommended authoritative files:
 * `state/locks/<project>.lock`
 * `state/locks/<run-id>.lock`
 * `state/locks/<task-id>.attempt-<n>.lock`
+* `state/current-task/<run-id>.json`
 * `state/plan-state.json`
 * `progress.md`
 * `results/plan-check/<run-id>.json`
@@ -109,6 +110,8 @@ Recommended task result file:
     "lint": "passed",
     "typecheck": "passed"
   },
+  "progressUpdated": true,
+  "progressPath": "/home/shing/.openclaw/projects/project-a/progress.md",
   "logPath": "/home/shing/.openclaw/projects/project-a/logs/tasks/task-2/attempt-1.log",
   "startedAt": "2026-03-23T10:00:00Z",
   "endedAt": "2026-03-23T10:10:00Z"
@@ -124,7 +127,11 @@ Recommended failed result file:
   "status": "failed",
   "retryable": true,
   "failureType": "validation",
+  "failureClass": "validation",
+  "errorFingerprint": "typecheck-src-foo-ts",
   "summary": "Typecheck failed after edits in src/foo.ts.",
+  "progressUpdated": true,
+  "progressPath": "/home/shing/.openclaw/projects/project-a/progress.md",
   "logPath": "/home/shing/.openclaw/projects/project-a/logs/tasks/task-2/attempt-2.log",
   "startedAt": "2026-03-23T10:20:00Z",
   "endedAt": "2026-03-23T10:28:00Z"
@@ -133,7 +140,7 @@ Recommended failed result file:
 
 ## Current-task schema
 
-Recommended `state/current-task.json`:
+Recommended `state/current-task/<run-id>.json`:
 
 ```json
 {
@@ -143,6 +150,7 @@ Recommended `state/current-task.json`:
   "workerProcessId": "proc_abc123",
   "startedAt": "2026-03-23T10:00:00Z",
   "deadlineAt": "2026-03-23T10:30:00Z",
+  "progressPath": "/home/shing/.openclaw/projects/project-a/progress.md",
   "logPath": "/home/shing/.openclaw/projects/project-a/logs/tasks/task-2/attempt-1.log",
   "resultPath": "/home/shing/.openclaw/projects/project-a/results/tasks/task-2/attempt-1.json",
   "lastCheckedAt": "2026-03-23T10:02:00Z"
@@ -166,18 +174,38 @@ While a valid task-attempt lock exists:
 
 Recommended defaults:
 
-* `maxRetriesPerTask = 2`
+* `maxRetriesPerTask = 3`
+* `maxRetriesPerFingerprint = 1`
 * `retryBackoff = 5m`
 * no retry for preflight unless explicitly forced by operator
 * no automatic retry for failed plan check
 
 Recommended behavior:
 
-1. failed attempt writes result and log
+1. failed attempt writes result, log, and progress entry
 2. controller records `attempt += 1`
-3. controller moves to `TASK_RETRY_WAIT`
-4. once backoff elapses, controller moves back to `TASK_READY`
-5. fresh worker reads prior failure logs before work
+3. controller checks `failureClass` and `errorFingerprint`
+4. controller stops immediately for `worker_contract`, `tooling_config`, `environment`, `input_contract`, or `state_integrity`
+5. controller moves retryable cases to `TASK_RETRY_WAIT`
+6. once backoff elapses, controller moves back to `TASK_READY`
+7. fresh worker reads prior failure logs and `progress.md` before work
+
+## Progress gate
+
+`progress.md` is an authoritative control file, not just an audit file.
+
+Before launching any task or retry, the controller should:
+
+1. read `progress.md`
+2. check for unresolved blocking issues
+3. check whether the same task has an unresolved prior failure
+4. check for completed tasks that do not have result files
+
+If unresolved blocking issues or evidence mismatches exist:
+
+* do not launch the next task
+* move to `WAIT_HUMAN` or `FAILED_FATAL`
+* report the issue explicitly
 
 ## Budget policy
 
@@ -197,7 +225,7 @@ On heartbeat after restart or uncertainty, reconcile in this order:
 
 1. read `state/runs/<run-id>.json`
 2. if the run is not `*_RUNNING`, stop
-3. read `state/current-task.json`
+3. read `state/current-task/<run-id>.json`
 4. check for a completed result file
 5. if result file exists, absorb it and clear the task lock
 6. if result file does not exist, check for the task-attempt lock
@@ -219,6 +247,20 @@ If a worker disappears without a result file, the controller should create a syn
 
 This keeps recovery deterministic.
 
+## Result consistency rule
+
+The controller must not treat a task as complete unless all three are consistent:
+
+* `state/plan-state.json`
+* `progress.md`
+* `results/tasks/<task-id>/attempt-<n>.json`
+
+If a task appears complete in progress or plan state but the result file is missing:
+
+* classify as `state_integrity`
+* stop new work
+* move to `WAIT_HUMAN` or `FAILED_FATAL`
+
 ## Reporting failure policy
 
 If task execution succeeded but reporting to Slack failed:
@@ -237,3 +279,5 @@ This protocol should be used together with:
 * `reference/design/heartbeat/plan-heartbeat-controller-spec.md`
 * `reference/design/heartbeat/plan-heartbeat-operator-protocol.md`
 * `reference/design/heartbeat/plan-heartbeat-plan-normalization.md`
+* `reference/design/heartbeat/plan-heartbeat-worker-protocol.md`
+* `reference/design/heartbeat/plan-heartbeat-progress-protocol.md`

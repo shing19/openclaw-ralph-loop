@@ -73,6 +73,7 @@ The controller should reconstruct state from:
 * `state/runs/*.json`
 * `state/locks/*`
 * `progress.md`
+* `state/current-task/<run-id>.json`
 * result files under `results/`
 * log files under `logs/`
 
@@ -134,6 +135,10 @@ If no preflight worker is active:
 
 If no active task attempt lock exists:
 
+* read `progress.md`
+* check for unresolved blocking issues
+* verify that the selected task has no unresolved fatal or blocked prior entry
+* verify that completed prior tasks have durable result evidence
 * launch one fresh task worker
 * move to `TASK_RUNNING`
 
@@ -148,7 +153,12 @@ If no active task attempt lock exists:
 
 If retry delay has elapsed and retry budget remains:
 
-* promote back to `TASK_READY`
+* read `progress.md`
+* inspect the last failure class and error fingerprint
+* if the failure is non-retryable, move to `WAIT_HUMAN` or `FAILED_FATAL`
+* if the same error fingerprint already exhausted its budget, move to `WAIT_HUMAN` or `FAILED_FATAL`
+* if unresolved blocking issues remain in progress, do not relaunch
+* otherwise promote back to `TASK_READY`
 
 ### `WAIT_HUMAN`
 
@@ -233,7 +243,25 @@ On retry:
 * increment `attempt`
 * pass prior failure log paths
 * pass the prior failure summary
+* pass only a bounded recent log list plus a condensed summary
 * require the worker to read the old logs before it starts
+* require the worker to read `progress.md` before it starts
+
+## Failure classification behavior
+
+The controller must not treat all failed task results the same.
+
+Recommended rule:
+
+* `validation`, `transient_exec`, and some `external_dependency` failures may be retried
+* `worker_contract`, `tooling_config`, `environment`, `input_contract`, and `state_integrity` failures must not enter blind retry
+* `blocked_human` should move directly to `WAIT_HUMAN`
+
+If a failure is non-retryable:
+
+* stop launching task workers
+* write the blocking reason to run state
+* report the exact failure class and log path
 
 ## Budget behavior
 
