@@ -786,3 +786,4 @@ Use this architecture doc together with:
 * `reference/design/heartbeat/plan-heartbeat-operator-protocol.md`
 * `reference/design/heartbeat/plan-heartbeat-state-protocol.md`
 * `reference/design/heartbeat/plan-heartbeat-plan-normalization.md`
+* `reference/design/heartbeat/plan-heartbeat-verification-checklist.md`
