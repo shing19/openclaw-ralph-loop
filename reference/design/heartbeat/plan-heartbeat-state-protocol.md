@@ -165,10 +165,25 @@ Recommended rules:
 * run lock prevents concurrent lifecycle mutation of one run
 * task-attempt lock prevents duplicate launch of the same task attempt
 
+Recommended task-attempt lock metadata:
+
+* `taskId`
+* `attempt`
+* `runId`
+* `ownerPid`, if available
+* `createdAt`
+* `lastHeartbeatAt`
+
 While a valid task-attempt lock exists:
 
 * the same task attempt must not be relaunched
 * heartbeat may only poll or reconcile
+
+Recommended stale-lock rule:
+
+* a lock is stale if the owning process is gone and no completed result file exists
+* a lock may also be stale after controller restart if its owner pid no longer exists
+* stale locks must not keep the run in `TASK_RUNNING`
 
 ## Retry policy
 
@@ -231,8 +246,11 @@ On heartbeat after restart or uncertainty, reconcile in this order:
 6. if result file does not exist, check for the task-attempt lock
 7. if lock exists, check pid or process handle if available
 8. if process is alive, keep `TASK_RUNNING`
-9. if process is not alive and no result exists, mark failure and create a synthetic failure result
-10. if state is inconsistent, move to `WAIT_HUMAN`
+9. if process is not alive and no result exists, classify interruption or disappearance and create a synthetic failure result
+10. clear or archive the stale task lock
+11. write an interrupted or synthetic failure entry to `progress.md`
+12. move the run to `WAIT_HUMAN` or `FAILED_FATAL` based on failure class and policy
+13. if state is inconsistent beyond recovery, move to `WAIT_HUMAN`
 
 ## Synthetic failure result
 
@@ -241,11 +259,21 @@ If a worker disappears without a result file, the controller should create a syn
 * task id
 * attempt number
 * failure type
+* failure class
+* exit cause, if known
 * inferred reason
 * prior log path if any
 * time of reconcile
 
 This keeps recovery deterministic.
+
+Synthetic reconcile must also:
+
+* clear or archive the stale task-attempt lock
+* update `progress.md`
+* remove `TASK_RUNNING` as the active state for that run
+
+The controller must not leave the run indefinitely in `TASK_RUNNING` after synthetic reconciliation.
 
 ## Result consistency rule
 

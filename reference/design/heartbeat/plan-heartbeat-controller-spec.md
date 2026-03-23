@@ -255,6 +255,7 @@ Recommended rule:
 
 * `validation`, `transient_exec`, and some `external_dependency` failures may be retried
 * `worker_contract`, `tooling_config`, `environment`, `input_contract`, and `state_integrity` failures must not enter blind retry
+* `interrupted` failures must trigger reconcile and explicit state transition, not indefinite `TASK_RUNNING`
 * `blocked_human` should move directly to `WAIT_HUMAN`
 
 If a failure is non-retryable:

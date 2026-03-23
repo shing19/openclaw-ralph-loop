@@ -711,6 +711,14 @@ If a worker crashes or times out:
 * mark the task as retryable or fatal
 * on retry, pass the prior logs forward
 
+If a worker is interrupted by gateway restart, `SIGTERM`, `SIGINT`, or hard kill:
+
+* the worker should perform best-effort trap cleanup
+* if worker-side cleanup does not happen, controller reconcile must synthesize the failure
+* stale task locks must be cleared or archived
+* `progress.md` must still receive an interrupted or synthetic failure entry
+* the run must not remain indefinitely in `TASK_RUNNING`
+
 ### Gateway restart
 
 Heartbeat mode reduces restart impact, but it does not eliminate it.

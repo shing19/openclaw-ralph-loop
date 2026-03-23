@@ -595,6 +595,7 @@ Use this table to find the first failing layer.
 | Preflight passed but task runtime still fails on first invocation | worker protocol or preflight smoke test | worker contract |
 | Preflight passed but task never launches | task selection, lock creation, budget gate | scheduler |
 | Task launches twice | lock handling, reconcile logic | duplicate launch protection |
+| Worker disappeared and run still says `TASK_RUNNING` forever | interruption cleanup, stale lock handling, synthetic reconcile | crash recovery |
 | Code changed but `progress.md` did not update | result absorption path | persistence |
 | Infinite retry on same error | retry budget, failure classification, progress gate | retry control |
 | Task failed but retry has no context | retry payload builder | retry inheritance |
@@ -613,6 +614,7 @@ Every meaningful change should run at least these scenarios:
 6. reporting failure after successful task execution
 7. restart or reconcile while a task is in `TASK_RUNNING`
 8. duplicate `start` for the same project from another channel
+9. kill or restart during active task execution, with no normal result file written
 
 ## Acceptance record template
 

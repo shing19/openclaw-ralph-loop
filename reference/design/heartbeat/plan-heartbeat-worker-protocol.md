@@ -137,6 +137,7 @@ Recommended classes:
 * `environment`
 * `input_contract`
 * `state_integrity`
+* `interrupted`
 * `blocked_human`
 * `unknown`
 
@@ -150,8 +151,51 @@ Recommended retry policy by class:
 * `environment`: non-retryable
 * `input_contract`: non-retryable
 * `state_integrity`: non-retryable
+* `interrupted`: non-retryable until controller reconcile decides otherwise
 * `blocked_human`: non-retryable until operator action
 * `unknown`: retry once at most, then escalate
+
+## Interruption protocol
+
+Task workers must support best-effort cleanup on abnormal termination.
+
+Recommended rule:
+
+* `ralph-run-task` must install cleanup traps for `SIGTERM`, `SIGINT`, and shell `EXIT`
+* cleanup must be idempotent
+* cleanup must not assume the main runtime exited normally
+
+Minimum best-effort cleanup responsibilities:
+
+* write a failure result if no final result exists yet
+* update `progress.md` with an interrupted entry and log path
+* annotate the result with `failureClass: interrupted`
+* include `exitCause` when known, for example `sigterm`, `sigint`, `oom_kill`, or `shell_exit`
+* release or mark stale the task-attempt lock if the worker owns it
+
+Recommended shape for an interrupted result:
+
+```json
+{
+  "taskId": "T023",
+  "attempt": 1,
+  "status": "failed",
+  "retryable": false,
+  "failureClass": "interrupted",
+  "exitCause": "sigterm",
+  "errorFingerprint": "worker-interrupted-sigterm",
+  "summary": "Worker was interrupted before it could write a normal result.",
+  "progressUpdated": true,
+  "progressPath": "/home/shing/.openclaw/projects/project-a/progress.md",
+  "logPath": "/home/shing/.openclaw/projects/project-a/logs/tasks/T023/attempt-1.log",
+  "startedAt": "2026-03-24T00:39:00Z",
+  "endedAt": "2026-03-24T00:53:00Z"
+}
+```
+
+Worker-side cleanup is best-effort only.
+
+The controller must still assume cleanup can be skipped entirely if the worker is killed hard enough.
 
 ## Error fingerprint
 
@@ -166,6 +210,7 @@ Examples:
 * `codex-cli-unknown-flag`
 * `missing-progress-file`
 * `typecheck-src-foo-ts`
+* `worker-interrupted-sigterm`
 
 The retry system should budget both:
 
@@ -251,6 +296,7 @@ The worker protocol is not satisfied unless all of these are true:
 * worker always writes a result or a synthetic failure result
 * worker always updates `progress.md`
 * worker always reads `progress.md` before task execution
+* worker installs best-effort interruption cleanup
 * worker never retries by itself
 * worker never hides runtime invocation errors inside a generic retryable failure
 
